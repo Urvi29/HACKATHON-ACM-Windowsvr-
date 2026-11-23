@@ -3,6 +3,7 @@ import hashlib
 import os
 import shutil
 import stat
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -11,6 +12,7 @@ from urllib.parse import quote
 from . import crawler
 
 PARTIAL = 64 * 1024
+IS_WINDOWS = sys.platform.startswith("win")
 
 
 def _hash_file(path: str, partial: bool) -> str:
@@ -221,10 +223,16 @@ def _trash_dir_for(path: str) -> tuple[Path, Path | None]:
 
 
 def send_to_trash(path: str) -> str:
-    """Move one file/folder to the desktop Trash (freedesktop.org spec), so the file manager can restore it."""
+    """Move one file/folder to the system trash so the file manager can restore it.
+    Windows: the Recycle Bin (via send2trash). Linux: the freedesktop.org Trash spec."""
     path = os.path.abspath(path)
     if not os.path.lexists(path):
         raise FileNotFoundError(f"not found on disk: {path}")
+    if IS_WINDOWS:
+        from send2trash import send2trash as _send2trash
+
+        _send2trash(path)  # Recycle Bin; raises OSError on failure
+        return path
     trash, top = _trash_dir_for(path)
     (trash / "files").mkdir(parents=True, exist_ok=True)
     (trash / "info").mkdir(parents=True, exist_ok=True)
@@ -261,7 +269,8 @@ def trash_files(conn, ids: list[int]) -> dict:
             errors.append({"id": fid, "error": "not a local file"})
             continue
         try:
-            places.add(str(Path(send_to_trash(r["path"])).parent.parent))
+            dest = send_to_trash(r["path"])
+            places.add("Recycle Bin" if IS_WINDOWS else str(Path(dest).parent.parent))
             moved.append(fid)
         except OSError as e:
             errors.append({"id": fid, "error": str(e)})

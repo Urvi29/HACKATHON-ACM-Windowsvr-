@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from . import db
-from .util import IGNORE_DIRS, PSEUDO_FS
+from .util import IGNORE_DIRS_LOWER, PSEUDO_FS
 
 
 @dataclass
@@ -26,10 +26,15 @@ class LocalSource:
         self.id, self.root, self.name, self.config = id, os.path.abspath(root), name or root, config or {}
 
     def _skip_dir(self, path: str, name: str) -> bool:
-        if name in IGNORE_DIRS or name.startswith(".") or path in PSEUDO_FS:  # hidden dirs hold app state, not user files
+        if name.lower() in IGNORE_DIRS_LOWER or name.startswith(".") or path in PSEUDO_FS:  # hidden dirs hold app state, not user files
             return True
-        if path in (str(db.ROOT / "libs"), str(db.ROOT / "models")):
-            return True  # this project's bundled libraries and model weights
+        try:
+            if os.stat(path).st_file_attributes & 0x2:  # Windows FILE_ATTRIBUTE_HIDDEN (AppData, etc.)
+                return True
+        except (OSError, AttributeError):
+            pass
+        if path in (str(db.ROOT / "libs"), str(db.ROOT / "models"), str(db.ROOT / "data"), str(db.ROOT / ".pycache"), str(db.ROOT / ".uv-cache")):
+            return True  # this project's bundled libraries, model weights, index and caches
         try:
             return os.path.samefile(path, db.DB_PATH.parent)
         except OSError:

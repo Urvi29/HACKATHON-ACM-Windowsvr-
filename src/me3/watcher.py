@@ -5,7 +5,7 @@ import threading
 import time
 
 from . import crawler, db, embed, extract
-from .util import IGNORE_DIRS
+from .util import IGNORE_DIRS_LOWER
 
 
 def lower_priority():
@@ -29,7 +29,7 @@ class Watcher:
         data_dir = str(db.DB_PATH.parent)
         if p == data_dir or p.startswith(data_dir + os.sep):
             return True  # the app's own data folder (database, logs, synthetic test data) is never indexed
-        if any(part in IGNORE_DIRS or (part.startswith('.') and part not in ('', '.', '..')) for part in p.split(os.sep)):
+        if any(part.lower() in IGNORE_DIRS_LOWER or (part.startswith('.') and part not in ('', '.', '..')) for part in p.split(os.sep)):
             return True
         return os.path.dirname(p) == str(db.DB_PATH.parent) and os.path.basename(p).startswith(db.DB_PATH.name)
 

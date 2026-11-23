@@ -87,7 +87,9 @@ def index_path(conn, src, path: str) -> None:
 
 
 def remove_path(conn, sid: int, path: str) -> None:
-    like = path.rstrip("/").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%"
+    from .util import like_esc
+
+    like, _ = like_esc(path)
     ids = [
         r["id"]
         for r in conn.execute(

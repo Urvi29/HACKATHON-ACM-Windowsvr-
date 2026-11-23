@@ -18,12 +18,27 @@ EXTRACTABLE = TEXT_EXTS | {"pdf", "docx", "gdoc", "gsheet", "gslides"}
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".cache", ".venv", "venv", ".uv-cache", ".mypy_cache", ".pytest_cache",
                # credentials / app state / package stores: never index these when scanning a whole home folder
                ".ssh", ".gnupg", ".pki", ".aws", ".kube", ".docker", ".config", ".local", ".var", ".claude", ".mozilla",
-               ".npm", ".cargo", ".rustup", ".pycache", "site-packages", "dist-packages", "Trash", ".Trash"}
+               ".npm", ".cargo", ".rustup", ".pycache", "site-packages", "dist-packages", "Trash", ".Trash",
+               # Windows equivalents: OS / app data / package stores, so scanning a whole drive stays sane
+               "appdata", "application data", "windows", "program files", "program files (x86)", "programdata",
+               "$recycle.bin", "system volume information", "perflogs", "recovery", "msocache", "installer",
+               "onedrivetemp", "config.msi", "windows.old"}
+IGNORE_DIRS_LOWER = {d.lower() for d in IGNORE_DIRS}
 PSEUDO_FS = {"/proc", "/sys", "/dev", "/run"}
 
 
 def ext_of(name: str) -> str:
     return os.path.splitext(name)[1].lstrip(".").lower()
+
+
+def like_esc(prefix: str, sep: str | None = None) -> tuple[str, str]:
+    """LIKE patterns (used with `ESCAPE '\\'`) for everything directly under / nested below `prefix`.
+    Returns (direct_children, nested). Works with '/' and '\\' separators so it is safe on Windows too."""
+    esc = "\\"
+    p = prefix.rstrip("/\\").replace(esc, esc * 2).replace("%", esc + "%").replace("_", esc + "_")
+    s = (sep or os.sep).replace(esc, esc * 2)
+    base = p + s
+    return base + "%", base + "%" + s + "%"
 
 
 def classify(ext: str) -> str:

@@ -154,6 +154,8 @@
   .chip button:hover { opacity:1; background:transparent; }
   .examples { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; align-items:center; }
   .examples button { font-size:12.5px; padding:4px 11px; border-radius:99px; background:transparent; color:var(--soft); border-style:dashed; }
+  .examples button .sx { margin-left:6px; color:var(--mute); font-size:14px; line-height:1; }
+  .examples button .sx:hover { color:var(--bad); }
 
   .reshead { display:flex; align-items:center; gap:10px; margin-bottom:6px; min-height:30px; }
   .reshead .meta { flex:1; }
@@ -378,6 +380,8 @@
   <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
   <symbol id="i-hdd" viewBox="0 0 24 24"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5 13 7.5 5h9L19 13M7 16.5h.01"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
 </svg>
 
 <header>
@@ -413,7 +417,7 @@
     <div class="addbox hidden" id="addbox">
       <div class="seg" id="stabs"><button class="on" data-k="local"><svg class="i"><use href="#i-folder"/></svg> Folder</button><button data-k="gdrive"><svg class="i"><use href="#i-drive"/></svg> Google Drive</button></div>
       <div id="f-local">
-        <div class="row"><input id="l-root" placeholder="/home/you/Documents" aria-label="Folder path"></div>
+        <div class="row"><input id="l-root" placeholder="C:\Users\you\Documents (or /home/you/Documents)" aria-label="Folder path"></div>
         <div class="row"><input id="s-name" placeholder="Display name (optional)" aria-label="Display name"></div>
       </div>
       <div id="f-gdrive" class="hidden">
@@ -470,15 +474,19 @@
       <button class="btn-ghost" id="f-reset">Reset</button>
     </div>
     <div class="chips" id="parsed"></div>
+    <div class="examples hidden" id="saved-row"><small>Saved:</small></div>
     <div class="examples" id="examples"><small>Try:</small></div>
   </div>
   <div class="card">
     <div class="progress" id="busy"><i></i></div>
     <div class="reshead">
       <div class="meta" id="count" aria-live="polite"></div>
-      <div class="seg" id="view" aria-label="Result layout">
-        <button data-v="list" title="List" aria-label="List view"><svg class="i"><use href="#i-list"/></svg></button>
-        <button data-v="grid" title="Grid" aria-label="Grid view"><svg class="i"><use href="#i-grid"/></svg></button>
+      <div class="row" style="gap:10px">
+        <button class="btn-sm" id="save-btn"><svg class="i"><use href="#i-bookmark"/></svg> Save search</button>
+        <div class="seg" id="view" aria-label="Result layout">
+          <button data-v="list" title="List" aria-label="List view"><svg class="i"><use href="#i-list"/></svg></button>
+          <button data-v="grid" title="Grid" aria-label="Grid view"><svg class="i"><use href="#i-grid"/></svg></button>
+        </div>
       </div>
     </div>
     <div id="pager-st"></div><div class="hits" id="results"></div>
@@ -495,6 +503,11 @@
     </div>
     <div id="cl-chart"></div>
     <small style="display:block;margin-top:10px">“Analyse” hashes candidate duplicates, which can take a few seconds on big indexes. “Move to trash” sends files to your computer’s Trash, so you can restore them from the file manager. Only local files can be moved.</small>
+  </div>
+  <div class="card">
+    <h3>Scheduled cleanup report <span class="hint" id="rep-when"></span>
+      <button class="btn-sm sp" id="rep-run"><svg class="i"><use href="#i-calendar"/></svg> Run now</button></h3>
+    <div id="cl-report"><small>Loading…</small></div>
   </div>
   <div class="card"><h3>Duplicate files <span class="hint" id="dup-count"></span></h3>
     <div class="types hidden" id="dup-types" style="margin:0 0 12px"></div>
@@ -571,6 +584,17 @@ function confirmBox(title, body, okText = 'Confirm', danger = false) {
     const key = e => { if (e.key === 'Escape') done(false); };
     m.onclick = e => { if (e.target === m) done(false); const a = e.target.closest('[data-a]'); if (a) done(a.dataset.a === '1'); };
     document.addEventListener('keydown', key); document.body.appendChild(m); m.querySelector('[data-a="1"]').focus();
+  });
+}
+function askText(title, value = '') {
+  return new Promise(res => {
+    const m = document.createElement('div'); m.className = 'modal'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true');
+    m.innerHTML = `<div class="box"><h4>${esc(title)}</h4><input id="ask-in" value="${esc(value)}" aria-label="${esc(title)}"><div class="row"><button data-a="0">Cancel</button><button data-a="1" class="btn-pri">Save</button></div></div>`;
+    const inp = m.querySelector('#ask-in');
+    const done = v => { m.remove(); document.removeEventListener('keydown', key); res(v); };
+    const key = e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter') done(inp.value.trim() || null); };
+    m.onclick = e => { if (e.target === m) done(null); const a = e.target.closest('[data-a]'); if (a) done(a.dataset.a === '1' ? (inp.value.trim() || null) : null); };
+    document.addEventListener('keydown', key); document.body.appendChild(m); inp.focus(); inp.select();
   });
 }
 async function copyText(t) {
@@ -811,6 +835,7 @@ function showTab(t) {
   if (location.hash.slice(1) !== t) history.replaceState(null, '', '#' + t);
   if (t === 'privacy' && !$('pout').textContent) redact();
   if (t === 'overview') loadOverview();
+  if (t === 'cleanup') loadReport();
 }
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => showTab(b.dataset.t));
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
@@ -966,6 +991,45 @@ document.addEventListener('keydown', e => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
   if (e.key === '/' && !typing && !document.querySelector('.modal')) { e.preventDefault(); showTab('search'); $('q').focus(); }
 });
+
+// ================= saved searches =================
+let savedList = [];
+const savedState = () => ({kind, minmb: $('minmb').value, maxmb: $('maxmb').value, after: $('after').value, before: $('before').value});
+const savedEmpty = () => { const s = savedState(); return !$('q').value.trim() && !s.kind && !s.minmb && !s.maxmb && !s.after && !s.before; };
+async function loadSaved() {
+  let rows;
+  try { rows = await J('/api/saved_searches'); } catch { return; }
+  savedList = rows;
+  $('saved-row').classList.toggle('hidden', !rows.length);
+  $('saved-row').innerHTML = '<small>Saved:</small>' + rows.map(x =>
+    `<button data-saved="${x.id}" title="${esc(x.query || 'no words')}">${esc(x.name)}<span class="sx" data-del="${x.id}" role="button" aria-label="Remove saved search">×</span></button>`).join('');
+}
+function applySaved(s) {
+  const f = s.filters || {};
+  $('q').value = s.query || '';
+  $('minmb').value = f.minmb || ''; $('maxmb').value = f.maxmb || ''; $('after').value = f.after || ''; $('before').value = f.before || '';
+  setKind(f.kind || '');
+  runSearch();
+}
+$('saved-row').onclick = async e => {
+  const d = e.target.closest('[data-del]');
+  if (d) {
+    e.stopPropagation();
+    try { await J('/api/saved_searches/' + d.dataset.del, {method: 'DELETE'}); toast('Saved search removed', 'ok'); loadSaved(); }
+    catch (err) { toast(err.message, 'bad'); }
+    return;
+  }
+  const b = e.target.closest('[data-saved]'); if (!b) return;
+  const s = savedList.find(x => x.id === +b.dataset.saved); if (s) applySaved(s);
+};
+$('save-btn').onclick = async () => {
+  if (savedEmpty()) { toast('Nothing to save yet: type a search or set a filter first', 'bad'); return; }
+  const name = await askText('Name this search', $('q').value.trim() || (kind ? KIND_LABEL[kind] || kind : 'My search'));
+  if (!name) return;
+  try { await post('/api/saved_searches', {name, query: $('q').value, filters: savedState()}); toast(`Saved “${name}”`, 'ok'); loadSaved(); }
+  catch (e) { toast(e.message, 'bad'); }
+};
+loadSaved();
 
 // ================= sidebar: index stats =================
 async function stats() {
@@ -1168,6 +1232,33 @@ $('t-cleanup').addEventListener('click', async e => {
   catch (err) { toast(err.message, 'bad'); }
   loadCleanup(); stats();
 });
+
+// ================= scheduled cleanup report (non-destructive) =================
+async function loadReport() {
+  let r;
+  try { r = await J('/api/cleanup/report'); } catch (e) { $('cl-report').innerHTML = `<small>Couldn’t load the report: ${esc(e.message)}</small>`; return; }
+  $('rep-when').textContent = r.latest ? (r.due ? 'due now' : 'next ' + new Date(r.next_due * 1000).toLocaleString()) : `every ${r.interval_hours} h`;
+  const L = r.latest;
+  if (!L) {
+    $('cl-report').innerHTML = `<small>A report is written automatically every ${r.interval_hours} h and kept here, so you can see whether things improve. It only counts and sums — nothing is ever deleted or moved.</small>`;
+    return;
+  }
+  const d = L.data;
+  $('cl-report').innerHTML = `<small>Last written ${new Date(L.created * 1000).toLocaleString()} · ${d.files.toLocaleString()} files indexed · ${fmt(d.bytes)} in total</small>
+    <div class="tiles" style="margin-top:10px">
+      <div class="tile"><b>${d.duplicate_groups.toLocaleString()}</b><small>duplicate sets · ${fmt(d.duplicate_wasted_bytes)} could be freed</small></div>
+      <div class="tile"><b>${d.large_files.toLocaleString()}</b><small>files over 50 MB · ${fmt(d.large_bytes)}</small></div>
+      <div class="tile"><b>${d.stale_media_files.toLocaleString()}</b><small>old media · ${fmt(d.stale_media_bytes)}</small></div>
+    </div>
+    <small style="display:block;margin-top:10px">${d.ideas} organisation idea(s) are ready in the Organise tab. Nothing here is deleted: use the sections below to review and act.</small>
+    ${r.history.length > 1 ? `<details style="margin-top:10px"><summary>Earlier reports (${r.history.length - 1})</summary><table class="dt"><tr><th>When</th><th style="text-align:right">Duplicate waste</th><th style="text-align:right">Old media</th><th style="text-align:right">Files</th></tr>
+      ${r.history.slice(1).map(h => `<tr><td>${new Date(h.created * 1000).toLocaleString()}</td><td class="n">${fmt(h.data.duplicate_wasted_bytes)}</td><td class="n">${fmt(h.data.stale_media_bytes)}</td><td class="n">${h.data.files.toLocaleString()}</td></tr>`).join('')}</table></details>` : ''}`;
+}
+$('rep-run').onclick = async () => {
+  toast('Writing a report…');
+  try { await post('/api/cleanup/report/run', {}); toast('Report written', 'ok'); loadReport(); }
+  catch (e) { toast(e.message, 'bad'); }
+};
 
 // ================= organise (AI) with privacy preview =================
 let llmOk = false, ideaList = [];

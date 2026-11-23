@@ -8,17 +8,20 @@ AI-powered local search, organisation and cleanup for local storage. Private dat
 
 ## STATUS (update every change)
 
-- **Last updated:** 2026-11-23 (UI redesign: light/dark/royal themes, cleaner search, sources, cleanup, organise, privacy)
-- **Phase:** 2 - all three brief requirements implemented and tested: (1) efficient live index, (2) Google Drive connector (SFTP removed on purpose: no data may leave the machine to arbitrary hosts), (3) search by meaning (text + images) with type/date/size filters; plus hybrid privacy layer, cleanup and AI organisation suggestions.
+- **Last updated:** 2026-11-23 (Windows port + saved searches + scheduled cleanup reports; Windows real-world run on `C:\Users\<you>\Downloads`; 35 tests pass / 3 skipped on Windows)
+- **Phase:** 2 - all three brief requirements implemented and tested: (1) efficient live index, (2) Google Drive connector (SFTP removed on purpose: no data may leave the machine to arbitrary hosts), (3) search by meaning (text + images) with type/date/size filters; plus hybrid privacy layer, cleanup, AI organisation suggestions, saved searches and scheduled cleanup reports.
 - **Run it:** `cd ~/Desktop/AquaFlare/me3-fsi && source env.sh && python -m me3 serve --port 8765` then open http://127.0.0.1:8765 (or `make run`). Small demo: `python scripts/make_demo.py && ME3_DB=$PWD/data/demo.db python -m me3 index data/demo && ME3_DB=$PWD/data/demo.db python -m me3 serve --port 8766`.
-- **Tests:** `make test` -> 31 pass (core, privacy, connectors, semantic).
+  **Windows (PowerShell):** `. .\env.ps1` then `python -m me3 serve --port 8765` (see SETUP COMMANDS for the one-time install). The web UI still needs a Google OAuth Desktop client file (see "WHAT YOU NEED TO DO" / "Cannot work without extra setup").
+- **Tests:** `python -m pytest -q tests` -> 35 pass, 3 skipped on Windows (the 3 skipped assert freedesktop.org Trash behaviour, which only exists on Linux/BSD; Windows uses the Recycle Bin instead and has its own test). On Linux the same suite runs via `make test`, with the Recycle-Bin test skipped instead.
 - **Working:**
   - Index: incremental crawler, inotify live watcher (polling fallback; remote sources rescan every 120s), low priority threads, text extraction txt/code/pdf/docx/gdoc into FTS5.
   - Search: hybrid = FTS5 keywords + MiniLM text meaning + CLIP image meaning, fused with RRF; local NL parser (`nlq.py`) extracts type/size/date ("last semester", "photos", "larger than 5MB", "in March 2024"); synonym expansion for everyday document words; thumbnails in UI.
   - Connectors: Local, Google Drive (live: OAuth done, source added).
   - Privacy: `privacy.py` (Presidio + PAN/Aadhaar/IFSC/UPI/phone/Luhn cards/secrets), `prepare_payload` builds the only thing that can reach `llm.py`; UI shows the exact redacted payload and requires an explicit send click; works without an API key (on-device rule-based ideas).
-  - Disks panel (sidebar): every physical disk (lsblk) with used/free (statvfs, matches df) and a bar of what fills it by file type + "Apps & system" (OS folders, swap, hidden home folders) + hatched "Reserved & unreadable" (fs reserve, root-only folders) + free; biggest folders; Trash size. `disks.py` scans each mounted filesystem in a nice 10 / idle-I/O thread (~5-12 s for 1.1M files), cached in data/disks.json, auto-rescans after 1 h, Rescan button. API: GET /api/disks, POST /api/disks/rescan.
-  - Cleanup: duplicates (size -> partial hash -> full hash), large files, stale media, reversible trash (desktop Trash, freedesktop.org spec: restorable from the file manager), organisation ideas.
+  - Disks panel (sidebar): every physical disk with used/free and a bar of what fills it by file type + "Apps & system" (OS folders, swap, hidden home folders) + hatched "Reserved & unreadable" (fs reserve, root-only folders) + free; biggest folders; Trash size. Linux: `lsblk` + statvfs; Windows: Win32 `GetLogicalDrives`/`GetVolumeInformationW` + `shutil.disk_usage`. `disks.py` scans each mounted filesystem in a low-priority thread (nice 10 / idle I/O on Linux), cached in data/disks.json, auto-rescans after 1 h, Rescan button. API: GET /api/disks, POST /api/disks/rescan.
+  - Cleanup: duplicates (size -> partial hash -> full hash), large files, stale media, reversible trash (Windows: Recycle Bin via `send2trash`; Linux: freedesktop.org Trash spec, restorable from the file manager), organisation ideas.
+  - Saved searches: name a query and its filters ("Save search" in the Search tab) and re-run it with one click; stored in `saved_searches`, so they survive restarts. `saved.py`. API: GET/POST /api/saved_searches, DELETE /api/saved_searches/{id}.
+  - Scheduled cleanup report: a background thread (`reports.py`, every `ME3_REPORT_HOURS`, default 24 h) writes a **non-destructive** summary of reclaimable space (duplicate waste, files > 50 MB, old media, idea count) into `reports` and keeps the last 30. The Cleanup tab shows the latest report, the earlier ones, when the next one is due, and a "Run now" button. Nothing is ever deleted or moved. API: GET /api/cleanup/report, POST /api/cleanup/report/run.
 - **Benchmarks:** 100k synthetic files (2.1GB): crawl 2.2s, text extraction 62k files 5.3s, keyword search ~5ms, hybrid search 13-30ms warm (first query ~3s model load), duplicate analysis ~8s. Background embedding of the 100k set runs at ~30 files/s (about 30 min for 62k texts) while the app stays usable.
 - **Known issues / limits:**
   - Text embedding model is all-MiniLM-L6-v2 (weak on short abstract queries); a synonym lexicon (`nlq.SYNONYMS`) compensates. A stronger model (`BAAI/bge-small-en-v1.5`, set `ME3_TEXT_MODEL`, needs query prefix handling in embed.py) was not tested: download stalled.
@@ -38,11 +41,12 @@ AI-powered local search, organisation and cleanup for local storage. Private dat
 1. [x] Core index, watcher, extraction, FTS, NL parser, API, UI, tests.
 2. [x] Privacy layer + LLM layer (preview-then-send) + cleanup + organisation ideas.
 3. [x] Google Drive connector (SFTP removed). 4. [x] Torch, MiniLM + CLIP embeddings, hybrid search, thumbnails.
-5. [~] **Real-world validation** (~/Pictures done; ~/Documents and long-running inotify still to try): index a real folder (e.g. ~/Documents, ~/Pictures: 44 screenshots) via the UI; check inotify mode, search quality, CPU usage while embedding. Fix issues found.
+4. [x] **Windows port**: `env.ps1`, Windows disks (`_windows_hardware`, `shutil.disk_usage`, real `os.stat` for st_dev/st_ino/st_nlink), Recycle Bin trash (`send2trash`), no `nice` on Windows, separator-safe LIKE, Windows ignore dirs; deps + models installed into `./libs`/`./models`; 35 pass / 3 skipped; server + CLI smoke test OK. See "PLATFORM SUPPORT".
+5. [~] **Real-world validation**: ~/Pictures done on Linux; ~/Documents and long-running inotify still to try there. **On Windows: DONE** — background-indexed `C:\Users\<you>\Downloads` (15,222 files crawled in 4.2 s, 8,773 extracted in ~8 min) and confirmed CLI search by meaning ("invoice receipt" -> 39 real bills/receipts, "screenshot" -> 922 images); the new `saved_searches`/`reports` tables and `reports.generate()` verified against the live `data/me3.db`.
 6. [ ] **Google Drive live test**: `client_secret_362846242510-...json` is in the project root but untracked/unignored (do NOT `git add .`; code expects `credentials.json`, so either copy/rename it (gitignored) or point gdrive.py at it); then user runs a browser consent:  runs `python -m me3 gdrive-auth`, then `python -m me3 add-gdrive`. Verify walk/fetch/export of Docs. Consider Drive Changes API instead of full rescans.
 7. [ ] **Cloud LLM live test**: `.env` key is DONE (detected). Remaining: verify `/api/suggest` with `send=true`; consider LLM query-understanding fallback (redacted).
 8. [ ] Embedding model upgrade experiment (bge-small / mpnet) with eval queries in tests; OCR for scanned PDFs/images (needs `sudo pacman -S tesseract tesseract-data-eng poppler`, then wire pytesseract into extract.py).
-9. [ ] Extra: SMB connector (`smbprotocol`), file preview/open-folder actions, saved searches, scheduled cleanup.
+9. [~] Extra: **saved searches** (`saved.py`, API + UI, tests) and **scheduled cleanup reports** (`reports.py`, API + UI, tests) **done** — see "Working"; file preview / open-folder / show-in-folder **done** (see CHANGELOG). Remaining: SMB connector (`smbprotocol`).
 10. [ ] Final polish: visually check `docs/ME3_Project_Guide.pptx` once LibreOffice is installed; screenshots, demo script, README walkthrough, `make build` wheel.
 
 ## SETUP COMMANDS
@@ -65,9 +69,73 @@ HF_HUB_OFFLINE=0 python -c "from sentence_transformers import SentenceTransforme
 
 Optional system packages (user runs, needs sudo): `sudo pacman -S --needed tesseract tesseract-data-eng poppler openssh` (OCR not wired in yet).
 
+### Windows (PowerShell)
+
+`uv` is not required: this port installs the same libraries into `./libs` with plain `pip --target`. Run these from the project root.
+
+```powershell
+python -m pip install --target .\libs --no-warn-script-location fastapi "uvicorn[standard]" watchdog python-multipart jinja2 python-dotenv rich typer `
+  pypdf python-docx pillow pytesseract sqlite-vec numpy presidio-analyzer presidio-anonymizer spacy `
+  google-api-python-client google-auth-oauthlib anthropic pytest ruff send2trash
+python -m pip install --target .\libs --no-warn-script-location torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install --target .\libs --no-warn-script-location sentence-transformers
+python -m pip install --target .\libs --no-warn-script-location https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# one-time model download (env.ps1 sets HF_HUB_OFFLINE=1; turn it off only to download new models)
+. .\env.ps1; $env:HF_HUB_OFFLINE="0"
+python -c "from sentence_transformers import SentenceTransformer as S; S('all-MiniLM-L6-v2'); S('clip-ViT-B-32')"
+```
+
+Then, in every session: `. .\env.ps1` (the Windows equivalent of `source env.sh`) and run the app:
+
+```powershell
+python -m me3 serve --port 8765     # http://127.0.0.1:8765
+python -m pytest -q tests           # 29 pass, 3 skipped (POSIX-only Trash tests)
+```
+
+Notes:
+- `env.ps1` puts `./libs` and `./src` on `PYTHONPATH`, caches models in `./models` and bytecode in `./.pycache`. It does **not** need Developer Mode.
+- OCR on Windows: install Tesseract (e.g. the UB-Mannheim installer) and make sure `tesseract.exe` is on `PATH`; `extract.py` detects it automatically (no `nice` prefix — that is Linux/macOS only).
+- The `Makefile` uses `/bin/bash` and `uv`, so it is Linux/macOS only. On Windows run the `python -m ...` commands directly (above).
+
 Cloud LLM (optional): create `.env` with `ANTHROPIC_API_KEY=...` (gitignored). Model default `claude-haiku-5-5`, override `ME3_LLM_MODEL`.
 
 Google Drive: see docstring of `src/me3/connectors/gdrive.py` (Cloud Console -> Drive API -> OAuth Desktop client -> `credentials.json` in project root -> `python -m me3 gdrive-auth` -> `python -m me3 add-gdrive`).
+
+## WHAT YOU NEED TO DO (user-side setup)
+
+The pip steps above install the Python libraries only. These four things are yours to do; only the first is needed to use the browser UI, the rest are optional (the app degrades gracefully without them).
+
+1. **Google sign-in for the web UI — required for the browser UI.**
+   - Google Cloud Console -> APIs & Services -> Credentials -> Create credentials -> OAuth client ID -> application type **Desktop app**.
+   - Download the JSON and put it in the project root. Any of these names work: `credentials.json`, the auto-downloaded `client_secret_*.json` (found automatically), or point at it with `ME3_GOOGLE_CLIENT`.
+   - It is gitignored — **never commit it.**
+   - Start the app, open http://127.0.0.1:8765, sign in. The **first** Google account to sign in becomes the owner; to restrict access instead, set `ME3_ALLOWED_EMAILS=a@example.com,b@example.com` before first sign-in.
+2. **Google Drive connector — optional.** Same OAuth client file, then a one-time browser consent:
+   `python -m me3 gdrive-auth` followed by `python -m me3 add-gdrive`.
+3. **Cloud AI — optional.** Create `.env` in the project root with `GEMINI_API_KEY=...` (default provider) or `ANTHROPIC_API_KEY=...`; override the provider with `ME3_LLM_PROVIDER`. Without a key the app still works fully offline (rule-based organisation ideas).
+4. **OCR of scanned PDFs / images — optional.** Install Tesseract (Windows: the UB-Mannheim installer) and make sure `tesseract.exe` is on `PATH`; for scanned PDFs also install poppler (`pdftoppm`). `extract.py` turns OCR on automatically when it finds the binary.
+
+The complete list of things that cannot work without extra setup is in the next section.
+
+## PLATFORM SUPPORT: Windows vs Linux
+
+**Works on Windows** (verified): incremental index + live watcher (watchdog uses `ReadDirectoryChangesW`), text/PDF/DOCX extraction, MiniLM text + CLIP image embeddings, hybrid FTS5 + vector search, privacy redaction, cleanup (duplicates/large/stale/organise) and the Disks panel (Win32 API). End-to-end CLI smoke test on Windows: `index` -> 2 files extracted + embedded -> `search "something to cook for dinner"` returned the recipe file via meaning.
+
+**POSIX-only features** (they degrade gracefully on Windows, nothing crashes):
+| Feature | Linux / macOS | Windows behaviour |
+| --- | --- | --- |
+| Delete / "Move to trash" | freedesktop.org Trash (`~/.local/share/Trash`, restorable from the file manager) | Windows **Recycle Bin** via `send2trash` (restorable from Explorer) |
+| Background thread priority | `os.setpriority` + `ioprio_set` idle I/O class | skipped (`os.setpriority` does not exist) — threads run at normal priority |
+| Low-priority OCR subprocess | `nice -n 10 tesseract ...` | plain `tesseract ...` (`nice` is not present) |
+| On-disk size accounting | `st_blocks * 512` (allocated bytes, matches `df`) | no `st_blocks` on Windows -> logical file size is used, so the Disks numbers are approximate; hard-link de-duplication still works (via `st_ino`) |
+| `Makefile` targets (`make test/run/build`) | `bash` + `uv` | run the `python -m ...` commands directly (see above) |
+
+**Cannot work without extra setup** (true on every OS, not a Windows limitation):
+1. **Web UI sign-in:** requires a Google Cloud OAuth **Desktop** client JSON placed in the project root (`credentials.json` or `client_secret_*.json`). Without it `/login` cannot start the consent flow, so the browser UI is unusable (the CLI and the Python API still work).
+2. **Google Drive connector:** same OAuth client file plus a one-time browser consent (`python -m me3 gdrive-auth`).
+3. **OCR of scanned PDFs / images:** needs the external `tesseract` binary on `PATH` (and poppler's `pdftoppm` for scanned PDFs). Not installed by the pip steps; install it separately. Without it OCR is simply skipped.
+4. **Cloud LLM (optional):** needs an API key in `.env` (`ANTHROPIC_API_KEY` / `GEMINI_API_KEY`). Not required — the app works fully offline.
+5. **SFTP connector:** removed from the project on purpose (privacy); only Local + Google Drive remain.
 
 ## NOTES
 
@@ -127,6 +195,8 @@ tests/
 ```
 
 ## CHANGELOG (newest first)
+- 2026-11-23: **Saved searches + scheduled cleanup reports (Windows real-world run).** `saved.py`: name a query + its filters, re-run with one click; table `saved_searches`, API `GET/POST /api/saved_searches`, `DELETE /api/saved_searches/{id}`, UI "Save search" row in the Search tab, `tests/test_saved.py`. `reports.py`: a background thread writes a **non-destructive** cleanup summary (duplicate waste, files > 50 MB, stale media, idea count) every `ME3_REPORT_HOURS` (default 24 h) into `reports` (keeps the last 30); Cleanup tab shows latest/earlier/next-due + "Run now"; API `GET /api/cleanup/report`, `POST /api/cleanup/report/run`; nothing is ever deleted or moved, `tests/test_reports.py`. `db.py` schema extended; `api.py` starts/stops the report thread in `lifespan`. README gained the "WHAT YOU NEED TO DO" user-side setup section. Verified end-to-end on Windows against the live index of `C:\Users\<you>\Downloads` (15,222 files; CLI search "invoice receipt" -> 39, "screenshot" -> 922; both new tables + `reports.generate()` confirmed in `data/me3.db`). 35 pass, 3 skipped; ruff clean.
+- 2026-11-23: **Windows port.** New `env.ps1` (PowerShell `source env.sh`). `disks.py`: Windows hardware via Win32 `GetLogicalDrives`/`GetDriveTypeW`/`GetVolumeInformationW`, `shutil.disk_usage` for free space, `$Recycle.Bin` trash, real `os.stat` instead of `DirEntry.stat` (which reports st_dev/st_ino/st_nlink as 0 on Windows, breaking the mount check and hard-link de-dup), `st_blocks` fallback to size, `_lower_priority` no-op, `os.path.join` folder paths. `cleanup.py`: Recycle Bin via `send2trash` (Linux keeps the freedesktop Trash spec). `extract.py`: no `nice` prefix when `nice` is absent. `util.py`: Windows ignore dirs + separator-safe `like_esc` (used in `crawler.py`, `api.py`). `pyproject.toml`: add `send2trash`. Tests: trash tests split POSIX/Windows, disks + duplicates tests made separator/symlink/hardlink safe. Deps + MiniLM/CLIP models installed into `./libs`/`./models`; `pytest` 29 pass, 3 skipped; server + end-to-end CLI index/search verified. `Makefile` remains Linux/macOS-only (bash+uv).
 - 2026-11-23: Disks panel: all disks + partitions, used/free, what fills each disk by type (new 'system' kind colour --k-system, validated vs every type colour: CVD dE>=8, normal dE>=15, contrast>=3:1 on dark/royal/light), biggest folders, Trash size; src/me3/disks.py, /api/disks, tests/test_disks.py. Rendered and checked in all 3 themes (headless Firefox).
 - 2026-11-23: "Move to trash" now uses the real desktop Trash (~/.local/share/Trash, or $topdir/.Trash-$uid on other drives) with .trashinfo files, so trashed files appear in the file manager and Restore works; was a private data/trash/<time>/ folder the user could not see. UI toasts now report files that could not be moved. Old data/trash/ (2 files from earlier) left in place. Test: tests/test_trash.py.
 - 2026-11-23: Organise fixes: (1) AI reply parsing is robust: Ollama uses a JSON schema (structured output), replies cut off mid-list keep their complete suggestions, one automatic retry, clear error naming the on-device AI instead of 'Cloud AI call failed (JSONDecodeError)'; (2) no harmful advice: rule ideas skip program/game/system folders, ML datasets (images paired with label files) and code projects (cleanup.folder_role); program files are left out of the AI sample and the prompt forbids moving them; (3) step-2 badge readable on the blue button; AI card shows target folder + example files. Tests added.

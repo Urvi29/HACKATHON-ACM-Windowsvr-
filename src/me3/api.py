@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from . import auth, cleanup, db, disks, embed, llm, privacy, sources
+from . import auth, cleanup, db, disks, embed, llm, privacy, reports, saved, sources
 from . import search as searchmod
 from .indexer import indexer
 
@@ -17,10 +17,12 @@ STATIC = Path(__file__).resolve().parent / "static"
 async def lifespan(app):
     db.connect()
     indexer.resume_all()
+    reports.start()
     if embed.available():
         import threading
         threading.Thread(target=lambda: (embed._model(embed.TEXT_MODEL), embed._model(embed.IMG_MODEL)), daemon=True).start()  # warm models
     yield
+    reports.stop()
     indexer.shutdown()
 
 
@@ -141,11 +143,12 @@ def add_source(s: SourceIn):
         if not os.path.isdir(s.root):
             raise HTTPException(400, f"not a directory: {s.root}")
         new = os.path.realpath(s.root)
+        sep = os.path.sep  # '\\' on Windows, '/' elsewhere: keep the nesting check separator-safe
         for r in db.get().execute("SELECT name, root FROM sources WHERE kind='local'"):
             old = os.path.realpath(r["root"])
-            if new == old or new.startswith(old.rstrip("/") + "/"):
+            if new == old or new.startswith(old.rstrip("/\\") + sep):
                 raise HTTPException(400, f"already indexed: {new} is inside '{r['name']}' ({old}), so its files are searchable already")
-            if old.startswith(new.rstrip("/") + "/"):
+            if old.startswith(new.rstrip("/\\") + sep):
                 raise HTTPException(400, f"{new} contains the existing source '{r['name']}' ({old}); remove that one first to avoid duplicate results")
     elif s.kind == "gdrive":
         from .connectors.gdrive import GDriveSource
@@ -225,6 +228,34 @@ def index_status():
     return indexer.snapshot()
 
 
+# ---------------------------------------------------------------- saved searches
+class SavedIn(BaseModel):
+    name: str
+    query: str = ""
+    filters: dict = {}
+
+
+@app.get("/api/saved_searches")
+def list_saved():
+    return saved.list_all(db.get())
+
+
+@app.post("/api/saved_searches")
+def add_saved(s: SavedIn):
+    try:
+        sid = saved.save(db.get(), s.name, s.query, s.filters)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"id": sid}
+
+
+@app.delete("/api/saved_searches/{sid}")
+def remove_saved(sid: int):
+    if not saved.delete(db.get(), sid):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- cleanup
 @app.get("/api/cleanup/summary")
 def cleanup_summary():
@@ -259,6 +290,19 @@ def cleanup_large(limit: int = 50, min_mb: int = 50):
 @app.get("/api/cleanup/stale")
 def cleanup_stale(days: int = 365, limit: int = 50):
     return cleanup.stale_media(db.get(), days, limit)
+
+
+@app.get("/api/cleanup/report")
+def cleanup_report(limit: int = Query(10, ge=1, le=50)):
+    """The latest scheduled cleanup report plus the earlier ones (nothing is ever deleted or moved)."""
+    c = db.get()
+    return {"latest": reports.latest(c), "history": reports.history(c, limit),
+            "interval_hours": reports.INTERVAL_H, "next_due": reports.next_due(c), "due": reports.due(c)}
+
+
+@app.post("/api/cleanup/report/run")
+def cleanup_report_run():
+    return reports.generate(db.get())
 
 
 # ---------------------------------------------------------------- viewing files (so users can check before trashing)
@@ -425,12 +469,15 @@ def file_open(fid: int, o: OpenIn):
 def folder_files(path: str, limit: int = Query(200, le=1000)):
     """Files directly inside one folder (used by Organise -> View files)."""
     from datetime import datetime
+
+    from .util import like_esc
+
     pre = path.rstrip("/\\")
-    esc_ = pre.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    direct, nested = like_esc(path)
     rows = db.get().execute(
         "SELECT id,name,path,kind,ext,size,mtime FROM files WHERE path LIKE ? ESCAPE '\\' AND path NOT LIKE ? ESCAPE '\\' ORDER BY kind, name LIMIT ?",
-        (esc_ + "/%", esc_ + "/%/%", limit)).fetchall()
-    total = db.get().execute("SELECT count(*) FROM files WHERE path LIKE ? ESCAPE '\\' AND path NOT LIKE ? ESCAPE '\\'", (esc_ + "/%", esc_ + "/%/%")).fetchone()[0]
+        (direct, nested, limit)).fetchall()
+    total = db.get().execute("SELECT count(*) FROM files WHERE path LIKE ? ESCAPE '\\' AND path NOT LIKE ? ESCAPE '\\'", (direct, nested)).fetchone()[0]
     return {"folder": pre, "total": total, "files": [dict(r) | {"modified": datetime.fromtimestamp(r["mtime"]).strftime("%Y-%m-%d %H:%M")} for r in rows]}
 
 
@@ -468,9 +515,11 @@ def suggest(s: SuggestIn):
     c = db.get()
     ideas = cleanup.organisation_ideas(c, s.source_id)
     rows = []
+    from .util import like_esc
+
     for i in ideas[:4]:  # sample from the messiest folders, then pad with random files
         rows += c.execute("SELECT * FROM files WHERE path LIKE ? ESCAPE '\\' ORDER BY random() LIMIT 12",
-                          (i["folder"].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "/%",)).fetchall()
+                          (like_esc(i["folder"])[0],)).fetchall()
     pool = c.execute("SELECT * FROM files ORDER BY random() LIMIT ?", (s.sample * 8,)).fetchall()
     rows += [r for r in pool if not cleanup.is_program_file(r["path"], r["ext"])][: max(0, s.sample - len(rows))]
     rows = [r for r in rows if not cleanup.is_program_file(r["path"], r["ext"])]  # apps/games/system files are not the user's clutter

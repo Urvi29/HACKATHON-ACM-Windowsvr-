@@ -1,10 +1,26 @@
-"""Move-to-trash uses the freedesktop.org Trash so the file manager can restore files."""
+"""Move-to-trash: freedesktop.org Trash on Linux/BSD, the Recycle Bin on Windows (both restorable from the file manager)."""
 import sqlite3
+import sys
 from urllib.parse import unquote
+
+import pytest
 
 from me3 import cleanup
 
+is_windows = sys.platform.startswith("win")
+posix_only = pytest.mark.skipif(is_windows, reason="freedesktop.org Trash is Linux/BSD only; Windows uses the Recycle Bin")
+windows_only = pytest.mark.skipif(not is_windows, reason="Recycle Bin is Windows only")
 
+
+@windows_only
+def test_send_to_trash_uses_recycle_bin(tmp_path):
+    src = tmp_path / "to_delete.txt"
+    src.write_text("bye")
+    cleanup.send_to_trash(str(src))
+    assert not src.exists()  # moved to the Recycle Bin (restorable from Explorer)
+
+
+@posix_only
 def test_send_to_trash_writes_trashinfo(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     src = tmp_path / "docs" / "my report.txt"
@@ -20,6 +36,7 @@ def test_send_to_trash_writes_trashinfo(tmp_path, monkeypatch):
     assert "DeletionDate=" in info
 
 
+@posix_only
 def test_same_name_gets_unique_trash_name(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     for d in ("a", "b"):
@@ -31,6 +48,7 @@ def test_same_name_gets_unique_trash_name(tmp_path, monkeypatch):
     assert (tmp_path / "share" / "Trash" / "info" / "x.1.jpg.trashinfo").exists()
 
 
+@posix_only
 def test_trash_files_drops_from_index(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     monkeypatch.setattr(cleanup.crawler, "remove_ids", lambda conn, ids: conn.executemany("DELETE FROM files WHERE id=?", [(i,) for i in ids]))

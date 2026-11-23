@@ -18,6 +18,7 @@ dependencies = [
   "pypdf",
   "python-docx",
   "python-multipart",
+  "send2trash",  # Windows Recycle Bin (on Linux the freedesktop Trash is used instead)
 ]
 
 [project.optional-dependencies]

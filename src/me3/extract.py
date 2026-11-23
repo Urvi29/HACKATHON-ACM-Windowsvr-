@@ -20,8 +20,13 @@ def ocr_available() -> bool:
     return os.environ.get("ME3_OCR", "1") != "0" and shutil.which("tesseract") is not None
 
 
+def _nice(*cmd: str) -> list[str]:
+    """Prefix a command with `nice -n 10` on systems that have it (Linux/macOS); plain command on Windows."""
+    return ["nice", "-n", "10", *cmd] if shutil.which("nice") else list(cmd)
+
+
 def _tesseract(img_path: str) -> str:
-    r = subprocess.run(["nice", "-n", "10", "tesseract", img_path, "-", "-l", "eng"], capture_output=True, text=True, timeout=60)
+    r = subprocess.run(_nice("tesseract", img_path, "-", "-l", "eng"), capture_output=True, text=True, timeout=60)
     return r.stdout if r.returncode == 0 else ""
 
 
@@ -34,7 +39,7 @@ def ocr_pdf(path: str) -> str:
     if not shutil.which("pdftoppm"):
         return ""
     with tempfile.TemporaryDirectory() as d:
-        subprocess.run(["nice", "-n", "10", "pdftoppm", "-r", "150", "-l", str(OCR_MAX_PAGES), "-png", path, os.path.join(d, "p")],
+        subprocess.run(_nice("pdftoppm", "-r", "150", "-l", str(OCR_MAX_PAGES), "-png", path, os.path.join(d, "p")),
                        capture_output=True, timeout=120)
         return "\n".join(_tesseract(os.path.join(d, f)) for f in sorted(os.listdir(d)))[:MAX_CHARS]
 

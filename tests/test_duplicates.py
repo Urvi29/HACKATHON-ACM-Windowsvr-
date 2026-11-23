@@ -1,3 +1,5 @@
+import os
+
 from me3 import cleanup, crawler, db, sources
 from me3.sources import Entry
 
@@ -12,7 +14,7 @@ def test_small_local_duplicates_are_found(tmp_path):
     sid = sources.add_source(conn, "local", str(d))
     crawler.scan(conn, sources.load(conn, sid))
     groups = cleanup.find_duplicates(conn, limit_groups=100)["groups"]
-    assert [sorted(f["path"].rsplit("/", 1)[-1] for f in g["files"]) for g in groups] == [["a.txt", "b.txt"]]
+    assert [sorted(os.path.basename(f["path"]) for f in g["files"]) for g in groups] == [["a.txt", "b.txt"]]
 
 
 def test_drive_duplicates_use_md5(tmp_path):

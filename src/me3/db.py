@@ -36,6 +36,19 @@ CREATE INDEX IF NOT EXISTS idx_files_extracted ON files(extracted);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
   name, path, body, tokenize='porter unicode61'
 );
+CREATE TABLE IF NOT EXISTS saved_searches(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  filters TEXT NOT NULL DEFAULT '{}',  -- JSON: the UI filter values (kind, sizes, dates)
+  created REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reports(
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                  -- 'cleanup'
+  created REAL NOT NULL,
+  data TEXT NOT NULL                   -- JSON summary produced by reports.generate()
+);
 """
 
 _init_done: set[str] = set()
