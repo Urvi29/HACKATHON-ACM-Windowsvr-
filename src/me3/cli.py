@@ -60,6 +60,31 @@ def gdrive_auth(no_browser: bool = False):
     print("[green]authorised[/]; token saved. Now: python -m me3 add-gdrive")
 
 
+@app.command("auth-check")
+def auth_check():
+    """Check the Google OAuth client file and token; say exactly what is missing."""
+    from .connectors import gdrive
+
+    try:
+        info = gdrive.client_info(gdrive.find_client_secret())
+    except RuntimeError as e:
+        print(f"[red]client file:[/] {e}")
+        raise typer.Exit(1)
+    print(f"[green]client file[/] {info['path']}")
+    print(f"  type: {info['kind']} client (browser sign-in OK)")
+    print(f"  project: {info['project_id'] or '(none listed)'}")
+    if not gdrive.TOKEN.exists():
+        print("[yellow]token:[/] not found -> run `python -m me3 gdrive-auth`")
+        return
+    print(f"[green]token[/] {gdrive.TOKEN}")
+    try:
+        gdrive.build_service().about().get(fields="user").execute()
+        print("[green]Drive API reachable[/] - token works; run `python -m me3 add-gdrive`")
+    except Exception as e:  # noqa: BLE001
+        print(f"[red]Drive API check failed[/] {e}")
+        raise typer.Exit(1)
+
+
 @app.command("add-gdrive")
 def add_gdrive(name: str = "Google Drive"):
     from .connectors.gdrive import GDriveSource

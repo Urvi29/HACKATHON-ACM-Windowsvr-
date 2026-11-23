@@ -15,9 +15,25 @@ OCR_MAX_PAGES = 5
 OCR_MAX_IMG_BYTES = 15 * 1024 * 1024
 
 
+def _bin(name: str, *fallbacks: str) -> str | None:
+    """Resolve an external tool: $ME3_<NAME>, then PATH, then well-known Windows install dirs."""
+    env = os.environ.get(f"ME3_{name.upper()}")
+    if env and os.path.exists(env):
+        return env
+    found = shutil.which(name)
+    if found:
+        return found
+    return next((p for p in fallbacks if os.path.exists(p)), None)
+
+
+def _tesseract_exe() -> str | None:
+    """Tesseract is often installed without touching PATH (UB-Mannheim), so probe the default location too."""
+    return _bin("tesseract", r"C:\Program Files\Tesseract-OCR\tesseract.exe", r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe")
+
+
 def ocr_available() -> bool:
-    """OCR switches on by itself when the tesseract binary exists (sudo pacman -S tesseract tesseract-data-eng). ME3_OCR=0 disables."""
-    return os.environ.get("ME3_OCR", "1") != "0" and shutil.which("tesseract") is not None
+    """OCR switches on by itself when Tesseract is installed (Windows: `winget install UB-Mannheim.TesseractOCR`; Linux: `pacman -S tesseract`). ME3_OCR=0 disables."""
+    return os.environ.get("ME3_OCR", "1") != "0" and _tesseract_exe() is not None
 
 
 def _nice(*cmd: str) -> list[str]:
@@ -26,7 +42,10 @@ def _nice(*cmd: str) -> list[str]:
 
 
 def _tesseract(img_path: str) -> str:
-    r = subprocess.run(_nice("tesseract", img_path, "-", "-l", "eng"), capture_output=True, text=True, timeout=60)
+    exe = _tesseract_exe()
+    if not exe:
+        return ""
+    r = subprocess.run(_nice(exe, img_path, "-", "-l", "eng"), capture_output=True, text=True, timeout=60)
     return r.stdout if r.returncode == 0 else ""
 
 

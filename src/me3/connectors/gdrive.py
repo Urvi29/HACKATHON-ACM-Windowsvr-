@@ -1,6 +1,7 @@
 """Google Drive source (read-only OAuth). Setup, once:
  1. Google Cloud Console -> APIs & Services -> enable "Google Drive API"
- 2. Credentials -> Create OAuth client ID (type: Desktop app) -> download JSON -> save in <project>/ (credentials.json or the original client_secret_*.json both work)
+ 2. Credentials -> Create OAuth client ID (type: Desktop app) -> download JSON. It is found automatically if it is
+    credentials.json / client_secret_*.json in the project root, in Downloads or on the Desktop (> python -m me3 auth-check)
  3. OAuth consent screen: add your Google account as a test user
  4. Run:  python -m me3 gdrive-auth      (opens a browser once; stores <project>/token.json)
  5. Add the source in the UI (kind=gdrive, root="/") or:  python -m me3 add-gdrive
@@ -9,28 +10,78 @@ The `service` argument allows injecting a fake Drive client for tests.
 """
 import contextlib
 import io
+import json
 import os
 import tempfile
 from datetime import datetime
+from pathlib import Path
 
 from .. import db
 from ..sources import Entry
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 CREDS = db.ROOT / "credentials.json"
+# folders we look in (the browser usually drops the console download into Downloads)
+SEARCH_DIRS = [db.ROOT, Path.home() / "Downloads", Path.home() / "Desktop"]
+DESKTOP_HINT = ("Google Cloud Console -> APIs & Services -> Credentials -> Create credentials -> "
+                "OAuth client ID -> Desktop app -> download the JSON")
+
+
+def client_info(path) -> dict:
+    """Read a client-secret JSON and check it is a Desktop-app client (the type loopback sign-in requires)."""
+    p = Path(path)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"{p.name} is not readable JSON ({e})") from e
+    if isinstance(data.get("web"), dict):
+        raise RuntimeError(f"{p.name} is a **Web** OAuth client; sign-in needs a **Desktop app** client ({DESKTOP_HINT}).")
+    if not isinstance(data.get("installed"), dict):
+        raise RuntimeError(f"{p.name} is not a Google OAuth client file (no 'installed' section).")
+    s = data["installed"]
+    return {"path": str(p), "kind": "Desktop", "project_id": s.get("project_id", ""), "client_id": s.get("client_id", "")}
+
+
+def _candidates():
+    """Files to try, in order: $ME3_GOOGLE_CLIENT (a file or a folder), project root, then Downloads/Desktop."""
+    env = os.environ.get("ME3_GOOGLE_CLIENT")
+    if env:
+        e = Path(env)
+        if e.is_dir():
+            yield e / "credentials.json"
+            yield from sorted(e.glob("client_secret*.json"))
+        else:
+            yield e
+    yield CREDS
+    for d in SEARCH_DIRS:
+        yield d / "credentials.json"
+        yield from sorted(d.glob("client_secret*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def find_client_secret():
-    """credentials.json, else the file Google's console downloads (client_secret_*.json), else $ME3_GOOGLE_CLIENT."""
-    env = os.environ.get("ME3_GOOGLE_CLIENT")
-    if env and os.path.exists(env):
-        return env
-    if CREDS.exists():
-        return CREDS
-    found = sorted(db.ROOT.glob("client_secret*.json"))
-    if found:
-        return found[0]
-    raise RuntimeError("No Google OAuth client file found: put credentials.json or client_secret_*.json in the project root")
+    """First valid Desktop OAuth client file found (see _candidates); raises with a clear fix when none is usable."""
+    seen, bad = set(), None
+    for p in _candidates():
+        try:
+            p = p.resolve()
+        except OSError:
+            continue
+        if str(p) in seen or not p.is_file():
+            continue
+        seen.add(str(p))
+        try:
+            client_info(p)
+            return p
+        except RuntimeError as e:  # a wrong file here does not stop us looking at the next candidate
+            bad = e
+    if bad:
+        raise bad
+    raise RuntimeError(
+        "No Google OAuth client file found. Create one (" + DESKTOP_HINT + ") and save the JSON as credentials.json "
+        "in the project root - or just leave it in Downloads. Looked in: " + ", ".join(str(d) for d in SEARCH_DIRS)
+    )
+
+
 TOKEN = db.ROOT / "token.json"
 FOLDER = "application/vnd.google-apps.folder"
 NATIVE = {  # mime -> (suffix we show, export mime)

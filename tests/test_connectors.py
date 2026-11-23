@@ -1,6 +1,10 @@
+import json
 from pathlib import Path
 
+import pytest
+
 from me3 import crawler, db, search, sources
+from me3.connectors import gdrive
 from me3.connectors.gdrive import GDriveSource
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,3 +43,37 @@ def test_gdrive_indexes_through_crawler(tmp_path):
     src = GDriveSource(sid, service=FakeDrive())
     assert crawler.scan(conn, src)["new"] == 2
     assert search.search(conn, "fee receipt", semantic=False)["total"] == 1  # filename match; .gdoc is a document
+
+
+def _write_client(p, kind="installed", project="aquaflare"):
+    p.write_text(json.dumps({kind: {"client_id": "x.apps.googleusercontent.com", "project_id": project}}))
+    return p
+
+
+def test_client_info_reads_desktop_client(tmp_path):
+    info = gdrive.client_info(_write_client(tmp_path / "c.json"))
+    assert info["kind"] == "Desktop" and info["project_id"] == "aquaflare"
+
+
+def test_find_client_secret_uses_env_path(tmp_path, monkeypatch):
+    f = _write_client(tmp_path / "client_secret_1.json")
+    monkeypatch.setenv("ME3_GOOGLE_CLIENT", str(f))
+    assert gdrive.find_client_secret() == f.resolve()
+
+
+def test_find_client_secret_scans_downloads(tmp_path, monkeypatch):
+    monkeypatch.delenv("ME3_GOOGLE_CLIENT", raising=False)
+    monkeypatch.setattr(gdrive, "CREDS", tmp_path / "credentials.json")  # project root has none
+    monkeypatch.setattr(gdrive, "SEARCH_DIRS", [tmp_path / "Downloads"])
+    (tmp_path / "Downloads").mkdir()
+    f = _write_client(tmp_path / "Downloads" / "client_secret_9.json")
+    assert gdrive.find_client_secret() == f.resolve()
+
+
+def test_find_client_secret_rejects_web_client(tmp_path, monkeypatch):
+    monkeypatch.delenv("ME3_GOOGLE_CLIENT", raising=False)
+    monkeypatch.setattr(gdrive, "CREDS", tmp_path / "credentials.json")
+    monkeypatch.setattr(gdrive, "SEARCH_DIRS", [tmp_path])
+    _write_client(tmp_path / "client_secret_web.json", kind="web")
+    with pytest.raises(RuntimeError, match="Desktop"):
+        gdrive.find_client_secret()
