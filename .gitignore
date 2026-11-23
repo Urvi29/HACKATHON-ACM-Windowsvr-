@@ -1,20 +1,58 @@
-# Secrets: never commit (repo is public)
+# # Secrets: never commit (repo is public)
+# .env
+# credentials.json
+# token.json
+# client_secret*.json
+# # Bulky / regenerable (see README "SETUP COMMANDS" to recreate)
+# libs/
+# models/
+# data/
+# .pycache/
+# .uv-cache/
+# __pycache__/
+# .pytest_cache/
+# .ruff_cache/
+# dist/
+# build/
+# *.egg-info/
+# *.db
+# *.db-*
+# .~lock*
+
+
+# Secrets: never commit (repository is public)
 .env
+.env.*
+!.env.example
 credentials.json
 token.json
 client_secret*.json
+
 # Bulky / regenerable (see README "SETUP COMMANDS" to recreate)
 libs/
 models/
 data/
-.pycache/
-.uv-cache/
+
+# Python cache and environments
 __pycache__/
+*.py[cod]
+.pycache/
 .pytest_cache/
 .ruff_cache/
+.uv-cache/
+venv/
+.venv/
+
+# Build artifacts
 dist/
 build/
 *.egg-info/
+
+# Database files
 *.db
 *.db-*
+
+# OS / editor files
+.DS_Store
+Thumbs.db
 .~lock*
