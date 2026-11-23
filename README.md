@@ -1,3 +1,5 @@
+# HACKATHON-ACM-Windowsvr-
+
 # ME3 File System Intelligence
 
 AI-powered local search, organisation and cleanup for local storage. Private data is detected and redacted **on-device** before any non-sensitive metadata reaches a cloud LLM.
