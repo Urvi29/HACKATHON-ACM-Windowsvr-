@@ -6,6 +6,18 @@ import re
 
 from . import db
 
+
+def _load_env():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(db.ROOT / ".env")
+    except Exception:
+        pass
+
+
+_load_env()
+
 GEMINI_MODEL = os.environ.get("ME3_GEMINI_MODEL", "gemini-3.5-flash-lite")
 # tried in order when the chosen model is overloaded (503/429/timeout) or retired (404)
 GEMINI_FALLBACKS = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]
@@ -71,15 +83,6 @@ def parse_reply(text: str) -> dict:
     if data.get("partial") and not out:
         raise ValueError("the reply broke off before any complete suggestion")
     return {"summary": str(data.get("summary") or "").strip(), "suggestions": out[:6], **({"partial": True} if data.get("partial") else {})}
-
-
-def _load_env():
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(db.ROOT / ".env")
-    except Exception:
-        pass
 
 
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
